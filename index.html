@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>12組別下注與排名賠率結算系統</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 30px; line-height: 1.5; background-color: #f4f6f9; }
+        .container { max-width: 950px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .step-title { background: #007bff; color: white; padding: 8px 15px; border-radius: 4px; margin-top: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background-color: #f8f9fa; }
+        input[type="number"], select { width: 90%; padding: 6px; box-sizing: border-box; }
+        .btn { background-color: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-top: 20px; width: 100%; }
+        .btn:hover { background-color: #218838; }
+        .error { color: red; font-weight: bold; margin-top: 15px; }
+        .result-box { background: #eef6ff; border: 1px solid #b6d4fe; padding: 15px; border-radius: 5px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>12 組別下注與排名賠率結算系統</h2>
+
+    <!-- 步驟 1：各組下注金額與名次 -->
+    <h3 class="step-title">輸入各組擁有金額、下注金額 (限制 20% ~ 100%) 與比賽名次</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>組別</th>
+                <th>擁有總金額</th>
+                <th>下注金額</th>
+                <th>比賽最終名次</th>
+                <th>對應賠率</th>
+                <th>預計獲得彩金 (需還給該組)</th>
+            </tr>
+        </thead>
+        <tbody id="betTableBody">
+            <!-- 由 JS 自動產生 12 列 -->
+        </tbody>
+    </table>
+
+    <button type="button" class="btn" onclick="calculateAll()">計算全組排名與結算金額</button>
+
+    <div id="errorMessage" class="error"></div>
+    <div id="summaryResult"></div>
+</div>
+
+<script>
+// 名次對應的賠率陣列 (索引 0 代表第 1 名賠率 2.0，以此類推)
+const RANK_ODDS = [2.0, 1.8, 1.6, 1.4, 1.2, 1.0, 0.8, 0.6, 0.4, 0.2, 0.1, 0.0];
+
+// 初始化表格
+function initTable() {
+    const tbody = document.getElementById('betTableBody');
+    let html = '';
+
+    for (let i = 1; i <= 12; i++) {
+        html += `
+            <tr>
+                <td><b>第 ${i} 組</b></td>
+                <td>
+                    <input type="number" id="balance_${i}" value="1000" step="0.01" min="1">
+                </td>
+                <td>
+                    <input type="number" id="bet_${i}" value="200" step="0.01">
+                </td>
+                <td>
+                    <select id="rank_${i}">
+                        ${generateRankOptions(i)}
+                    </select>
+                </td>
+                <td id="odd_disp_${i}">-</td>
+                <td id="payout_${i}">-</td>
+            </tr>
+        `;
+    }
+    tbody.innerHTML = html;
+}
+
+// 產生名次下拉選單 (預設第 N 組為第 N 名)
+function generateRankOptions(defaultRank) {
+    let options = '';
+    for (let r = 1; r <= 12; r++) {
+        const selected = (r === defaultRank) ? 'selected' : '';
+        options += `<option value="${r}" ${selected}>第 ${r} 名 (賠率 ${RANK_ODDS[r-1].toFixed(1)})</option>`;
+    }
+    return options;
+}
+
+// 結算計算
+function calculateAll() {
+    const errDiv = document.getElementById('errorMessage');
+    const summaryDiv = document.getElementById('summaryResult');
+    errDiv.innerHTML = '';
+    summaryDiv.innerHTML = '';
+
+    let errors = [];
+    let usedRanks = new Set();
+    
+    let totalBalance = 0;
+    let totalBet = 0;
+    let totalPayout = 0;
+
+    // 1. 基本數值與名次重複檢查
+    for (let i = 1; i <= 12; i++) {
+        const balance = parseFloat(document.getElementById(`balance_${i}`).value);
+        const bet = parseFloat(document.getElementById(`bet_${i}`).value);
+        const rank = parseInt(document.getElementById(`rank_${i}`).value);
+
+        // 金額檢查
+        if (isNaN(balance) || balance <= 0) {
+            errors.push(`第 ${i} 組：擁有金額必須大於 0`);
+        } else {
+            const minBet = balance * 0.20;
+            const maxBet = balance * 1.00;
+            if (isNaN(bet) || bet < minBet || bet > maxBet) {
+                errors.push(`第 ${i} 組：下注金額 (${bet || 0}) 不符限制！應介於 ${minBet.toFixed(1)} ~ ${maxBet.toFixed(1)}`);
+            }
+        }
+
+        // 檢查名次是否有重複選擇
+        if (usedRanks.has(rank)) {
+            errors.push(`名次重複錯誤：有多個組別被設定為「第 ${rank} 名」！`);
+        } else {
+            usedRanks.add(rank);
+        }
+    }
+
+    // 若有錯誤則中斷計算
+    if (errors.length > 0) {
+        const uniqueErrors = [...new Set(errors)];
+        errDiv.innerHTML = '<b>請修正以下問題：</b><br>' + uniqueErrors.join('<br>');
+        return;
+    }
+
+    // 2. 正式計算賠率與金額
+    for (let i = 1; i <= 12; i++) {
+        const balance = parseFloat(document.getElementById(`balance_${i}`).value);
+        const bet = parseFloat(document.getElementById(`bet_${i}`).value);
+        const rank = parseInt(document.getElementById(`rank_${i}`).value);
+
+        const odd = RANK_ODDS[rank - 1]; // 根據獲得的名次取得賠率
+        const payout = bet * odd;
+
+        // 更新單列顯示
+        document.getElementById(`odd_disp_${i}`).innerHTML = `<b>${odd.toFixed(1)}</b>`;
+        document.getElementById(`payout_${i}`).innerHTML = `<b>$${payout.toFixed(2)}</b>`;
+
+        totalBalance += balance;
+        totalBet += bet;
+        totalPayout += payout;
+    }
+
+    // 3. 顯示總體結算
+    const totalProfit = totalPayout - totalBet;
+    summaryDiv.innerHTML = `
+        <div class="result-box">
+            <h3>比賽結果總結算彙整</h3>
+            所有組別總擁有金額：<b>$${totalBalance.toFixed(2)}</b><br>
+            所有組別總下注金額：<b>$${totalBet.toFixed(2)}</b><br>
+            整體淨損益（總發出彩金 - 總收到下注金）：<b>${totalProfit >= 0 ? '+' : ''}$${totalProfit.toFixed(2)}</b>
+        </div>
+    `;
+}
+
+// 載入完成後初始化
+window.onload = initTable;
+</script>
+
+</body>
+</html>
